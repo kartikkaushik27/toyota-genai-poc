@@ -1,8 +1,6 @@
-# NOTE: AgentCore Runtime requires linux/arm64 in production. This POC builds
-# natively on the Harness Cloud amd64 runner (no QEMU/buildx available without
-# privileged mode) to prove out the CI/CD pipeline mechanics end-to-end. For a
-# real deployment, build with:
-#   docker buildx build --platform linux/arm64 -t <ecr-repo>:<tag> --push .
+# AgentCore Runtime requires linux/arm64. Built via buildx + QEMU emulation
+# in the CI pipeline (see agent_ci_build pipeline) since the Harness Cloud
+# runner itself is amd64.
 FROM python:3.12-slim
 
 WORKDIR /app
