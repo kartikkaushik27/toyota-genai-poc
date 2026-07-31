@@ -122,9 +122,17 @@ resource "aws_bedrockagentcore_gateway" "cell1" {
     mode = "LOG_ONLY" # LOG_ONLY for the POC so a bad policy can't lock out every tool call
   }
 
-  depends_on = [aws_bedrockagentcore_policy.default_permit, aws_iam_role_policy.gateway_permissions]
+  depends_on = [aws_bedrockagentcore_policy.default_permit, time_sleep.gateway_iam_propagation]
 
   tags = { Project = "toyota-genai-full" }
+}
+
+# IAM is eventually consistent — the AuthorizeAction permission the Gateway
+# needs on the Policy Engine can take longer to propagate than the immediate
+# next API call. This gives it a fixed buffer instead of failing intermittently.
+resource "time_sleep" "gateway_iam_propagation" {
+  depends_on      = [aws_iam_role_policy.gateway_permissions]
+  create_duration = "20s"
 }
 
 # ── Platform-level default Guardrail, used to populate BEDROCK_GUARDRAIL_ID/VERSION
