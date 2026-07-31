@@ -245,6 +245,14 @@ resource "aws_iam_role_policy" "runtime_cell_permissions" {
         Effect   = "Allow"
         Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
         Resource = "*"
+      },
+      {
+        # AgentCore validates it can pull the container image from ECR at
+        # Runtime-creation time using this role's credentials.
+        Sid      = "EcrPull"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"]
+        Resource = "*"
       }
     ]
   })
