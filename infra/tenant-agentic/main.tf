@@ -202,7 +202,8 @@ resource "aws_bedrockagentcore_policy" "tenant_forbid_others" {
   definition {
     cedar {
       statement = <<-EOT
-        forbid(principal, action == Action::"Delete", resource is AgentCore::Gateway);
+        forbid(principal, action, resource is AgentCore::Gateway)
+        when { action == Action::"Delete" };
       EOT
     }
   }
