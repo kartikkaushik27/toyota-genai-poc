@@ -97,6 +97,31 @@ resource "aws_cloudwatch_log_group" "gateway" {
   tags              = { Project = "toyota-genai-full" }
 }
 
+# ── Cognito User Pool backing the Gateway's CUSTOM_JWT authorizer (sheet:
+#    "Configure the Gateway OIDC discovery URL, allowed audiences, and allowed
+#    clients") — AWS validates the discovery document is actually reachable at
+#    Gateway-creation time, so this needs to be a real OIDC provider rather
+#    than a placeholder URL. ──
+resource "aws_cognito_user_pool" "gateway_auth" {
+  name = "${var.project_prefix}-gateway-pool"
+}
+
+resource "aws_cognito_user_pool_client" "gateway_auth" {
+  name         = "${var.project_prefix}-tenant-client"
+  user_pool_id = aws_cognito_user_pool.gateway_auth.id
+}
+
+resource "aws_cognito_resource_server" "gateway_auth" {
+  identifier   = "${var.project_prefix}-gateway-api"
+  name         = "${var.project_prefix}-gateway-api"
+  user_pool_id = aws_cognito_user_pool.gateway_auth.id
+
+  scope {
+    scope_name        = "invoke"
+    scope_description = "Invoke tools through the Cell 1 Gateway"
+  }
+}
+
 # ── AgentCore Gateway (sheet: "Deploy the Agentcore Gateway in Cell 1 with either
 #    CUSTOM_JWT or AWS_IAM authorization", "Configure the Gateway OIDC discovery URL,
 #    allowed audiences, and allowed clients", "Set the Gateway protocol type",
@@ -109,9 +134,9 @@ resource "aws_bedrockagentcore_gateway" "cell1" {
   authorizer_type = "CUSTOM_JWT"
   authorizer_configuration {
     custom_jwt_authorizer {
-      discovery_url    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${var.project_prefix}-pool/.well-known/openid-configuration"
-      allowed_audience = ["${var.project_prefix}-tenant-app"]
-      allowed_clients  = ["${var.project_prefix}-tenant-client"]
+      discovery_url    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.gateway_auth.id}/.well-known/openid-configuration"
+      allowed_audience = [aws_cognito_user_pool_client.gateway_auth.id]
+      allowed_clients  = [aws_cognito_user_pool_client.gateway_auth.id]
     }
   }
 
