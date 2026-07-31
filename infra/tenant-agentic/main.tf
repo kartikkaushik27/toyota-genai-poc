@@ -177,21 +177,29 @@ resource "aws_bedrockagentcore_gateway_target" "tenant_remote_mcp" {
 # ── Per-tenant Cedar policy (sheet: "Create Cedar policies with permit and forbid
 #    rules in the Policy Engine for each tenant") — AWS validates that the
 #    `resource` slot is constrained to a specific AgentCore::Gateway resource or
-#    the AgentCore::Gateway resource type (wildcard resources are rejected), so
-#    both rules scope to this tenant's Gateway rather than to an invented custom
-#    attribute that wouldn't exist in the policy engine's auto-generated schema. ──
+#    the AgentCore::Gateway resource type (wildcard resources are rejected), and
+#    separately rejects any `permit` where principal + action + resource are ALL
+#    unconstrained ("Overly Permissive"). So this scopes the permit to the one
+#    principal that should be allowed through: this tenant's own cross-account
+#    IAM role. ──
 resource "aws_bedrockagentcore_policy" "tenant_permit" {
   name             = "${replace(local.tenant, "-", "_")}_permit_tools"
   policy_engine_id = var.policy_engine_id
-  description      = "Permit tenant ${local.tenant} to call tools exposed through the Cell 1 Gateway"
+  description      = "Permit tenant ${local.tenant}'s own IAM role to call tools exposed through the Cell 1 Gateway"
 
   definition {
     cedar {
       statement = <<-EOT
-        permit(principal, action, resource is AgentCore::Gateway);
+        permit(
+          principal == AgentCore::IamEntity::"${aws_iam_role.tenant_agentic.arn}",
+          action,
+          resource is AgentCore::Gateway
+        );
       EOT
     }
   }
+
+  depends_on = [aws_iam_role.tenant_agentic]
 }
 
 resource "aws_bedrockagentcore_policy" "tenant_forbid_others" {

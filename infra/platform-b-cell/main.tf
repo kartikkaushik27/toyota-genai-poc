@@ -10,18 +10,31 @@ resource "aws_bedrockagentcore_policy_engine" "cell1" {
 # This is the platform-wide default; per-tenant permit/forbid rules are added in
 # infra/tenant-agentic (kept separate so tenant policies don't require re-applying
 # this workspace on every onboarding).
+#
+# AWS's policy analyzer rejects any statement where principal, action, AND
+# resource are all unconstrained ("Overly Permissive: will allow every request
+# for ... Any Future Tools ... if the policy is added") — so a blanket
+# permit-all isn't just bad practice here, it's a hard validation error. This
+# scopes the permit to the one principal that legitimately calls through the
+# Gateway on tenants' behalf: the AgentCore Runtime's own execution role.
 resource "aws_bedrockagentcore_policy" "default_permit" {
-  name             = "default_permit_read_tools"
+  name             = "default_permit_runtime_tools"
   policy_engine_id = aws_bedrockagentcore_policy_engine.cell1.policy_engine_id
-  description      = "Platform-wide baseline: permit read-only tool actions by default"
+  description      = "Permit the Cell 1 Runtime's execution role to call any tool through the Gateway"
 
   definition {
     cedar {
       statement = <<-EOT
-        permit(principal, action, resource is AgentCore::Gateway);
+        permit(
+          principal == AgentCore::IamEntity::"${aws_iam_role.runtime_cell.arn}",
+          action,
+          resource is AgentCore::Gateway
+        );
       EOT
     }
   }
+
+  depends_on = [aws_iam_role.runtime_cell]
 }
 
 # ── IAM role for the Gateway (sheet: "Create an IAM role for the Gateway with the
