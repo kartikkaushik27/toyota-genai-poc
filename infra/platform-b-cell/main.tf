@@ -71,9 +71,13 @@ resource "aws_iam_role_policy" "gateway_permissions" {
         Resource = "*"
       },
       {
+        # Per AWS docs (policy-permissions.html): the Gateway's execution role
+        # needs GetPolicyEngine, AuthorizeAction, and PartiallyAuthorizeActions
+        # on BOTH the policy-engine and gateway ARNs, or every tool invocation
+        # silently default-denies even with permit policies in place.
         Sid      = "PolicyEngineAccess"
         Effect   = "Allow"
-        Action   = ["bedrock-agentcore:GetPolicyEngine", "bedrock-agentcore:GetPolicy", "bedrock-agentcore:ListPolicies", "bedrock-agentcore:AuthorizeAction"]
+        Action   = ["bedrock-agentcore:GetPolicyEngine", "bedrock-agentcore:GetPolicy", "bedrock-agentcore:ListPolicies", "bedrock-agentcore:AuthorizeAction", "bedrock-agentcore:PartiallyAuthorizeActions"]
         Resource = "*"
       },
       {
@@ -132,7 +136,7 @@ resource "aws_bedrockagentcore_gateway" "cell1" {
 # next API call. This gives it a fixed buffer instead of failing intermittently.
 resource "time_sleep" "gateway_iam_propagation" {
   depends_on      = [aws_iam_role_policy.gateway_permissions]
-  create_duration = "20s"
+  create_duration = "30s"
 }
 
 # ── Platform-level default Guardrail, used to populate BEDROCK_GUARDRAIL_ID/VERSION
