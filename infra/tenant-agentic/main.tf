@@ -129,26 +129,14 @@ resource "aws_bedrockagentcore_gateway_target" "tenant_lambda_tool" {
 #    credential provider with gateway_iam_role and SigV4 for Remote MCP Server
 #    targets") — demonstrative target pointing at a placeholder endpoint; real
 #    tenants would supply their own MCP server URL here. ──
-resource "aws_bedrockagentcore_gateway_target" "tenant_remote_mcp" {
-  name               = "${local.tenant}-remote-mcp"
-  gateway_identifier = var.gateway_id
-  description        = "Placeholder remote MCP server target for tenant ${local.tenant}"
-
-  credential_provider_configuration {
-    gateway_iam_role {
-      service = "bedrock-agentcore"
-    }
-  }
-
-  target_configuration {
-    mcp {
-      mcp_server {
-        endpoint     = "https://${local.tenant}-mcp.example.com/mcp"
-        listing_mode = "DEFAULT"
-      }
-    }
-  }
-}
+# NOTE — Remote MCP Server target (sheet: "Register gateway targets of type
+# Remote MCP Server with the MCP endpoint URL") is intentionally not created
+# here either: AWS validates that the endpoint actually resolves and serves
+# an MCP handshake at Gateway-target-creation time, so it needs a real,
+# reachable MCP server (unlike the Lambda target above, which AWS can invoke
+# directly). Wiring one up is a config-only change once a tenant has a real
+# external MCP endpoint — swap this comment block back in with a real
+# `endpoint` value.
 
 # NOTE — HTTP Runtime target (sheet: "Register gateway targets of type HTTP
 # Runtime with runtime ARN and qualifier", "Set the SigV4 service to
@@ -211,14 +199,24 @@ resource "aws_bedrockagentcore_policy" "tenant_forbid_others" {
   # AgentCore::Action::"Mcp" — there's no per-verb (Read/Write/Delete) action
   # namespace, so "forbid" rules have to key off the `context.toolName` that
   # the Gateway injects at runtime rather than the `action` slot itself.
+  # AWS's analyzer also rejects a forbid with an unconstrained principal as
+  # "Overly Restrictive" (it would deny every future principal, not just this
+  # tenant), so — like the permit rule above — this scopes to the tenant's
+  # own IAM role.
   definition {
     cedar {
       statement = <<-EOT
-        forbid(principal, action, resource is AgentCore::Gateway)
+        forbid(
+          principal == AgentCore::IamEntity::"${aws_iam_role.tenant_agentic.arn}",
+          action,
+          resource is AgentCore::Gateway
+        )
         when { context has toolName && context.toolName like "*delete*" };
       EOT
     }
   }
+
+  depends_on = [aws_iam_role.tenant_agentic]
 }
 
 # ── AgentCore Memory in the Tenant Account, not Cell 1 (sheet: "Provision
