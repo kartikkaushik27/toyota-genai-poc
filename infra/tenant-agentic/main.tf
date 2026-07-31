@@ -252,7 +252,7 @@ resource "aws_bedrockagentcore_memory" "tenant" {
 #    strategy with namespaces") — proof point; SUMMARIZATION, USER_PREFERENCE,
 #    and EPISODIC follow the same shape with type changed. ──
 resource "aws_bedrockagentcore_memory_strategy" "tenant_semantic" {
-  name                = "${local.tenant}_semantic"
+  name                = "${replace(local.tenant, "-", "_")}_semantic"
   memory_id           = aws_bedrockagentcore_memory.tenant.id
   type                = "SEMANTIC"
   namespace_templates = ["${local.tenant}/facts"]
