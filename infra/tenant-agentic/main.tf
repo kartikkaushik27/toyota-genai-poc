@@ -203,15 +203,19 @@ resource "aws_bedrockagentcore_policy" "tenant_permit" {
 }
 
 resource "aws_bedrockagentcore_policy" "tenant_forbid_others" {
-  name             = "${replace(local.tenant, "-", "_")}_forbid_delete_actions"
+  name             = "${replace(local.tenant, "-", "_")}_forbid_delete_tools"
   policy_engine_id = var.policy_engine_id
-  description      = "Forbid tenant ${local.tenant} from invoking any Delete-named tool action through the Gateway"
+  description      = "Forbid tenant ${local.tenant} from invoking any tool whose name suggests a delete operation"
 
+  # Every tool call through the Gateway maps to the single action
+  # AgentCore::Action::"Mcp" — there's no per-verb (Read/Write/Delete) action
+  # namespace, so "forbid" rules have to key off the `context.toolName` that
+  # the Gateway injects at runtime rather than the `action` slot itself.
   definition {
     cedar {
       statement = <<-EOT
         forbid(principal, action, resource is AgentCore::Gateway)
-        when { action == Action::"Delete" };
+        when { context has toolName && context.toolName like "*delete*" };
       EOT
     }
   }
