@@ -73,7 +73,7 @@ resource "aws_iam_role_policy" "gateway_permissions" {
       {
         Sid      = "PolicyEngineAccess"
         Effect   = "Allow"
-        Action   = ["bedrock-agentcore:GetPolicyEngine", "bedrock-agentcore:GetPolicy", "bedrock-agentcore:ListPolicies"]
+        Action   = ["bedrock-agentcore:GetPolicyEngine", "bedrock-agentcore:GetPolicy", "bedrock-agentcore:ListPolicies", "bedrock-agentcore:AuthorizeAction"]
         Resource = "*"
       },
       {
