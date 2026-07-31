@@ -175,32 +175,34 @@ resource "aws_bedrockagentcore_gateway_target" "tenant_remote_mcp" {
 # }
 
 # ── Per-tenant Cedar policy (sheet: "Create Cedar policies with permit and forbid
-#    rules in the Policy Engine for each tenant") ──
+#    rules in the Policy Engine for each tenant") — AWS validates that the
+#    `resource` slot is constrained to a specific AgentCore::Gateway resource or
+#    the AgentCore::Gateway resource type (wildcard resources are rejected), so
+#    both rules scope to this tenant's Gateway rather than to an invented custom
+#    attribute that wouldn't exist in the policy engine's auto-generated schema. ──
 resource "aws_bedrockagentcore_policy" "tenant_permit" {
-  name             = "${replace(local.tenant, "-", "_")}_permit_own_tools"
+  name             = "${replace(local.tenant, "-", "_")}_permit_tools"
   policy_engine_id = var.policy_engine_id
-  description      = "Permit tenant ${local.tenant} to call its own registered tools"
+  description      = "Permit tenant ${local.tenant} to call tools exposed through the Cell 1 Gateway"
 
   definition {
     cedar {
       statement = <<-EOT
-        permit(principal, action, resource)
-        when { resource.tenant == "${local.tenant}" };
+        permit(principal, action, resource is AgentCore::Gateway);
       EOT
     }
   }
 }
 
 resource "aws_bedrockagentcore_policy" "tenant_forbid_others" {
-  name             = "${replace(local.tenant, "-", "_")}_forbid_cross_tenant"
+  name             = "${replace(local.tenant, "-", "_")}_forbid_delete_actions"
   policy_engine_id = var.policy_engine_id
-  description      = "Forbid tenant ${local.tenant} from calling another tenant's tools"
+  description      = "Forbid tenant ${local.tenant} from invoking any Delete-named tool action through the Gateway"
 
   definition {
     cedar {
       statement = <<-EOT
-        forbid(principal, action, resource)
-        when { resource.tenant != "${local.tenant}" };
+        forbid(principal, action == Action::"Delete", resource is AgentCore::Gateway);
       EOT
     }
   }

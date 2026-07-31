@@ -18,7 +18,7 @@ resource "aws_bedrockagentcore_policy" "default_permit" {
   definition {
     cedar {
       statement = <<-EOT
-        permit(principal, action == Action::"Read", resource);
+        permit(principal, action == Action::"Read", resource is AgentCore::Gateway);
       EOT
     }
   }
