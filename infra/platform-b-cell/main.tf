@@ -71,6 +71,12 @@ resource "aws_iam_role_policy" "gateway_permissions" {
         Resource = "*"
       },
       {
+        Sid      = "PolicyEngineAccess"
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:GetPolicyEngine", "bedrock-agentcore:GetPolicy", "bedrock-agentcore:ListPolicies"]
+        Resource = "*"
+      },
+      {
         Sid      = "Logging"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -116,7 +122,7 @@ resource "aws_bedrockagentcore_gateway" "cell1" {
     mode = "LOG_ONLY" # LOG_ONLY for the POC so a bad policy can't lock out every tool call
   }
 
-  depends_on = [aws_bedrockagentcore_policy.default_permit]
+  depends_on = [aws_bedrockagentcore_policy.default_permit, aws_iam_role_policy.gateway_permissions]
 
   tags = { Project = "toyota-genai-full" }
 }
