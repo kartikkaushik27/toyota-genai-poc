@@ -2,8 +2,13 @@ data "aws_ecr_repository" "agent" {
   name = "${var.project_prefix}-agent"
 }
 
+# The cell's IAM role names now carry the region, because a cell is
+# provisioned once per region and IAM is a global namespace. This picks up
+# the cell instance living in the same region this Runtime deploys into.
+data "aws_region" "current" {}
+
 data "aws_iam_role" "runtime" {
-  name = "${var.project_prefix}-cell1-runtime-role"
+  name = "${var.project_prefix}-cell1-${data.aws_region.current.region}-runtime-role"
 }
 
 resource "aws_bedrockagentcore_agent_runtime" "prod" {

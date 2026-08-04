@@ -4,13 +4,16 @@ locals {
   tenant = replace(lower(var.tenant_name), "/[^a-z0-9]/", "-")
 }
 
-# NOTE — name pattern updated to match opentofu/modules/gateway
-# ("${project_prefix}-${cell_name}-gateway-role"), following the Cell
-# Provisioning restructuring that replaced infra/platform-b-cell. "cell1" is
-# hardcoded here (this module has no cell_name variable of its own yet) —
-# turn this into a proper variable if/when a second cell is onboarded.
+# NOTE — name pattern matches opentofu/modules/gateway, which now includes the
+# region because a cell is provisioned once per region and IAM role names are
+# global. This resolves to the cell instance in the same region this tenant is
+# being onboarded into. "cell1" is still hardcoded (this module has no
+# cell_name variable of its own yet) — make it a variable when a second cell
+# is onboarded.
+data "aws_region" "current" {}
+
 data "aws_iam_role" "gateway" {
-  name = "${var.project_prefix}-cell1-gateway-role"
+  name = "${var.project_prefix}-cell1-${data.aws_region.current.region}-gateway-role"
 }
 
 # ── Per-tenant cross-account IAM role in Cell 1 (sheet: "Create a cross-account

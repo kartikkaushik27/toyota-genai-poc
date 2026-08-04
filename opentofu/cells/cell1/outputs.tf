@@ -1,3 +1,13 @@
+# Makes it obvious from the run log which region's copy of the cell you are
+# looking at, since the region is no longer visible as an input variable.
+output "cell_id" {
+  value = local.cell_id
+}
+
+output "region" {
+  value = data.aws_region.current.region
+}
+
 output "bedrock_models_available" {
   value = module.bedrock_enablement.models_available_count
 }

@@ -4,12 +4,18 @@ pipeline:
   projectIdentifier: toyota_genai_full
   orgIdentifier: default
   description: |
-    Provisions one GenAI Platform cell from opentofu/cells/<cell>.
+    Provisions one GenAI Platform cell from opentofu/cells/<cell> into BOTH
+    supported regions, us-east-1 and us-west-2.
 
-    One workspace per cell: the stage's workspace is resolved from the
-    cell_name input, so cell_name=cell1 targets the "cell1" IaCM workspace
-    (and its own state). Onboard a new cell with
-    harness/scripts/create-cell-workspace.py before running this for it.
+    Region is not an input. A cell instance is (cell, region), and each
+    instance owns its own workspace — and therefore its own OpenTofu state —
+    named <cell>_<region_with_underscores>. The first stage creates whichever
+    of those two workspaces is missing, so onboarding a brand-new cell is a
+    single run: add opentofu/cells/<cell>, then run this with the new
+    cell_name.
+
+    Harness IaCM holds the state for each workspace; there is deliberately no
+    S3 backend in the OpenTofu code.
 
     project_prefix is intentionally NOT an input — there is a single
     platform-wide prefix defined in opentofu/modules/naming.
@@ -17,26 +23,121 @@ pipeline:
   variables:
   - name: cell_name
     type: String
-    description: Cell to provision. Must match both the opentofu/cells/<cell_name> directory and the IaCM workspace identifier.
+    description: Cell to provision. Must match the opentofu/cells/<cell_name> directory. Provisioned into every region listed in the bootstrap stage.
     required: true
     value: <+input>.default(cell1)
-  - name: aws_region
-    type: String
-    description: AWS region the cell is deployed in
-    required: true
-    value: <+input>.default(us-east-1)
   - name: aws_connector
     type: String
-    description: Harness AWS connector for this cell's account. Harness pins the provider connector on the workspace itself, so this must match the connector configured on the target cell workspace.
+    description: Harness AWS connector for this cell's account. Harness pins the provider connector when a workspace is saved, so this is applied at workspace-creation time and must match the connector on an existing cell workspace.
     required: true
     value: <+input>.default(aws_full)
   stages:
   - stage:
-      name: Provision Cell
-      identifier: provision_cell
+      name: Ensure Cell Workspaces
+      identifier: ensure_cell_workspaces
+      type: CI
+      spec:
+        cloneCodebase: false
+        platform:
+          os: Linux
+          arch: Amd64
+        runtime:
+          type: Cloud
+          spec: {}
+        execution:
+          steps:
+          - step:
+              type: Run
+              name: Create Regional Workspaces If Missing
+              identifier: create_workspaces_if_missing
+              spec:
+                shell: Sh
+                image: python:3.12-alpine
+                envVariables:
+                  HARNESS_API_KEY: <+secrets.getValue("harness_api_key")>
+                  HARNESS_ACCOUNT_ID: <+account.identifier>
+                  HARNESS_ORG: <+org.identifier>
+                  HARNESS_PROJECT: <+project.identifier>
+                  CELL_NAME: <+pipeline.variables.cell_name>
+                  AWS_CONNECTOR: <+pipeline.variables.aws_connector>
+                command: |
+                  python3 - <<'PY'
+                  import json, os, sys, urllib.error, urllib.request
+
+                  # The regions this platform runs cells in. Adding a region
+                  # means adding it here AND adding a matching IACM stage
+                  # below — the stage list cannot be generated from this.
+                  REGIONS = ["us-east-1", "us-west-2"]
+
+                  BASE = "https://app.harness.io"
+                  cell = os.environ["CELL_NAME"]
+                  account = os.environ["HARNESS_ACCOUNT_ID"]
+                  org = os.environ["HARNESS_ORG"]
+                  project = os.environ["HARNESS_PROJECT"]
+                  key = os.environ["HARNESS_API_KEY"]
+                  root = f"/iacm/api/orgs/{org}/projects/{project}/workspaces"
+
+                  def call(method, path, body=None):
+                      data = json.dumps(body).encode() if body is not None else None
+                      req = urllib.request.Request(
+                          BASE + path, data=data, method=method,
+                          headers={"x-api-key": key, "Content-Type": "application/json"})
+                      try:
+                          with urllib.request.urlopen(req, timeout=60) as resp:
+                              raw = resp.read()
+                              return resp.status, (json.loads(raw) if raw.strip() else {})
+                      except urllib.error.HTTPError as exc:
+                          return exc.code, exc.read().decode()
+
+                  for region in REGIONS:
+                      # Harness identifiers allow letters, digits and
+                      # underscores only, so the region's dashes are folded.
+                      ws = f"{cell}_{region.replace('-', '_')}"
+
+                      status, _ = call("GET", f"{root}/{ws}?accountIdentifier={account}")
+                      if status < 300:
+                          print(f"Workspace '{ws}' already exists — nothing to do.")
+                          continue
+
+                      print(f"Workspace '{ws}' not found (HTTP {status}) — creating it.")
+                      payload = {
+                          "identifier": ws,
+                          "name": f"{cell} {region}",
+                          "description": f"{cell} in {region} — created by the Provision Cell pipeline.",
+                          "provisioner": "opentofu",
+                          "provisioner_version": "latest",
+                          "repository": "https://github.com/kartikkaushik27/toyota-genai-poc",
+                          "repository_branch": "main",
+                          "repository_connector": "github_full",
+                          # Same directory for every region: the code is
+                          # region-agnostic, only AWS_DEFAULT_REGION differs.
+                          "repository_path": f"opentofu/cells/{cell}",
+                          "cost_estimation_enabled": False,
+                          "provider_connector": os.environ["AWS_CONNECTOR"],
+                          "terraform_variables": {
+                              "cell_name": {"key": "cell_name", "value": cell, "value_type": "string"},
+                          },
+                          "environment_variables": {
+                              "AWS_ACCESS_KEY_ID": {"key": "AWS_ACCESS_KEY_ID", "value": "aws_access_key_id", "value_type": "secret"},
+                              "AWS_SECRET_ACCESS_KEY": {"key": "AWS_SECRET_ACCESS_KEY", "value": "aws_secret_access_key", "value_type": "secret"},
+                              "AWS_SESSION_TOKEN": {"key": "AWS_SESSION_TOKEN", "value": "aws_session_token", "value_type": "secret"},
+                              # This is the only place the region enters the
+                              # run. The AWS provider reads it from here.
+                              "AWS_DEFAULT_REGION": {"key": "AWS_DEFAULT_REGION", "value": region, "value_type": "string"},
+                          },
+                      }
+                      status, body = call("POST", f"{root}?accountIdentifier={account}", payload)
+                      if status >= 300:
+                          sys.exit(f"Failed to create workspace '{ws}' ({status}): {body}")
+                      print(f"Created workspace '{ws}' -> opentofu/cells/{cell} in {region}")
+                  PY
+      tags: {}
+  - stage:
+      name: Provision us-east-1
+      identifier: provision_us_east_1
       type: IACM
       spec:
-        workspace: <+pipeline.variables.cell_name>
+        workspace: <+pipeline.variables.cell_name>_us_east_1
         platform:
           os: Linux
           arch: Amd64
@@ -59,14 +160,65 @@ pipeline:
                 command: plan
           - step:
               type: HarnessApproval
-              name: Review Cell Plan
-              identifier: review_cell_plan
+              name: Review Plan us-east-1
+              identifier: review_plan_us_east_1
               timeout: 1d
               spec:
                 approvalMessage: |
                   Review the OpenTofu plan for cell <+pipeline.variables.cell_name>
-                  in region <+pipeline.variables.aws_region> (connector
-                  <+pipeline.variables.aws_connector>) before it is applied.
+                  in us-east-1 (connector <+pipeline.variables.aws_connector>)
+                  before it is applied.
+                includePipelineExecutionHistory: true
+                isAutoRejectEnabled: false
+                approvers:
+                  userGroups:
+                  - _project_all_users
+                  minimumCount: 1
+                  disallowPipelineExecutor: false
+                approverInputs: []
+          - step:
+              type: IACMTerraformPlugin
+              name: OpenTofu Apply
+              identifier: tofu_apply
+              spec:
+                command: apply
+      tags: {}
+  - stage:
+      name: Provision us-west-2
+      identifier: provision_us_west_2
+      type: IACM
+      spec:
+        workspace: <+pipeline.variables.cell_name>_us_west_2
+        platform:
+          os: Linux
+          arch: Amd64
+        runtime:
+          type: Cloud
+          spec: {}
+        execution:
+          steps:
+          - step:
+              type: IACMTerraformPlugin
+              name: OpenTofu Init
+              identifier: tofu_init
+              spec:
+                command: init
+          - step:
+              type: IACMTerraformPlugin
+              name: OpenTofu Plan
+              identifier: tofu_plan
+              spec:
+                command: plan
+          - step:
+              type: HarnessApproval
+              name: Review Plan us-west-2
+              identifier: review_plan_us_west_2
+              timeout: 1d
+              spec:
+                approvalMessage: |
+                  Review the OpenTofu plan for cell <+pipeline.variables.cell_name>
+                  in us-west-2 (connector <+pipeline.variables.aws_connector>)
+                  before it is applied.
                 includePipelineExecutionHistory: true
                 isAutoRejectEnabled: false
                 approvers:
