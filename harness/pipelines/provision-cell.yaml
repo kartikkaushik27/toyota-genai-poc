@@ -1,0 +1,81 @@
+pipeline:
+  name: Provision Cell
+  identifier: provision_cell
+  projectIdentifier: toyota_genai_full
+  orgIdentifier: default
+  description: |
+    Provisions one GenAI Platform cell from opentofu/cells/<cell>. All cell
+    identity is passed in at run time as pipeline variables — the OpenTofu
+    code itself declares the variables but defaults none of them. The IaCM
+    workspace maps these pipeline variables onto its OpenTofu variables.
+  tags: {}
+  variables:
+  - name: cell_name
+    type: String
+    description: Name of the cell to provision — namespaces every resource in the cell
+    required: true
+    value: <+input>.default(cell1)
+  - name: aws_region
+    type: String
+    description: AWS region the cell is deployed in
+    required: true
+    value: <+input>.default(us-east-1)
+  - name: project_prefix
+    type: String
+    description: Naming prefix for all resources in the cell
+    required: true
+    value: <+input>.default(toyota-full)
+  stages:
+  - stage:
+      name: Provision Cell
+      identifier: provision_cell
+      type: IACM
+      spec:
+        workspace: <+input>.default(toyota_full_platform_b)
+        platform:
+          os: Linux
+          arch: Amd64
+        runtime:
+          type: Cloud
+          spec: {}
+        execution:
+          steps:
+          - step:
+              type: IACMTerraformPlugin
+              name: OpenTofu Init
+              identifier: tofu_init
+              spec:
+                command: init
+          - step:
+              type: IACMTerraformPlugin
+              name: OpenTofu Plan
+              identifier: tofu_plan
+              spec:
+                command: plan
+          - step:
+              type: HarnessApproval
+              name: Review Cell Plan
+              identifier: review_cell_plan
+              timeout: 1d
+              spec:
+                approvalMessage: |
+                  Review the OpenTofu plan for cell <+pipeline.variables.cell_name>
+                  before it is applied. Note: the first plan against the new
+                  cells/modules layout will show destroy+recreate of the
+                  AgentCore resources, because resource addresses moved into
+                  modules and KMS/authorizer changes are ForceNew.
+                includePipelineExecutionHistory: true
+                isAutoRejectEnabled: false
+                approvers:
+                  userGroups:
+                  - _project_all_users
+                  minimumCount: 1
+                  disallowPipelineExecutor: false
+                approverInputs: []
+          - step:
+              type: IACMTerraformPlugin
+              name: OpenTofu Apply
+              identifier: tofu_apply
+              spec:
+                command: apply
+      tags: {}

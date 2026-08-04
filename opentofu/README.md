@@ -31,14 +31,52 @@ opentofu/
           dev.tfvars     # Per-region, per-environment variable overrides
 ```
 
+## How variables reach the cell
+
+`cells/cell1/variables.tf` declares `cell_name`, `aws_region` and
+`project_prefix` with **no defaults** — the cell is a pure "declare inputs,
+call modules" shell. Values come from the run-time chain:
+
+```
+provision-cell pipeline variables
+        ↓  (<+pipeline.variables.NAME>)
+IaCM workspace OpenTofu variables
+        ↓
+opentofu/cells/cell1  →  opentofu/modules/*
+```
+
+Harness variable precedence is workspace variables > variable sets > HCL
+defaults, so with no defaults in code a missing pipeline input fails loudly
+instead of quietly provisioning something named `cell1`.
+
+The pipeline is `Provision Cell` (`provision_cell`) — YAML kept in
+`harness/pipelines/provision-cell.yaml`. It prompts at run time for
+`cell_name`, `aws_region`, `project_prefix`, and the target IaCM workspace,
+then runs init → plan → approval → apply.
+
+For a local run, pass the tfvars file explicitly (it is not auto-loaded,
+since it isn't named `terraform.tfvars` / `*.auto.tfvars`):
+
+```bash
+tofu plan -var-file=env/us-east-1/dev.tfvars
+```
+
 ## Adding a new cell
 
 1. Copy `cells/cell1/` to `cells/cell2/`.
 2. Change the `backend.tf` state `key` to `cells/cell2/terraform.tfstate`.
 3. Set `cell_name = "cell2"` (and any other overrides) in a new
-   `env/<region>/<env>.tfvars`.
-4. Point a new Harness IaCM workspace at `opentofu/cells/cell2`,
-   `provisioner = opentofu`.
+   `env/<region>/<env>.tfvars` for local runs.
+4. Create a new Harness IaCM workspace pointed at `opentofu/cells/cell2`,
+   `provisioner = opentofu`, with its OpenTofu variables set to the same
+   `<+pipeline.variables.*>` expressions as the cell1 workspace.
+5. Run the existing `Provision Cell` pipeline and pick that workspace — the
+   pipeline itself needs no changes, since the workspace is a runtime input.
+
+One workspace = one state file = one cell. Passing a different `cell_name`
+to an existing cell's workspace renames resources **inside that cell's
+state**; it does not create a second cell. A real second cell needs its own
+workspace as described above.
 
 No module changes required — that's the point of splitting modules out from
 the per-cell composition root.
