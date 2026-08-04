@@ -4,15 +4,17 @@ pipeline:
   projectIdentifier: toyota_genai_full
   orgIdentifier: default
   description: |
-    Provisions one GenAI Platform cell from opentofu/cells/<cell> into BOTH
-    supported regions, us-east-1 and us-west-2.
+    Provisions one GenAI Platform cell from opentofu/cells into BOTH supported
+    regions, us-east-1 and us-west-2.
 
-    Region is not an input. A cell instance is (cell, region), and each
+    A cell instance is the triple (cell_name, cell_type, region). Each
     instance owns its own workspace — and therefore its own OpenTofu state —
-    named <cell>_<region_with_underscores>. The first stage creates whichever
-    of those two workspaces is missing, so onboarding a brand-new cell is a
-    single run: add opentofu/cells/<cell>, then run this with the new
-    cell_name.
+    identified as <cell>_<type>_<region>. Region is not an input: the pipeline
+    always does both regions, and the first stage creates whichever of the two
+    workspaces is missing.
+
+    There is a single cell directory, not one per cell: onboarding a cell is a
+    run of this pipeline with a new cell_name, never a new directory.
 
     Harness IaCM holds the state for each workspace; there is deliberately no
     S3 backend in the OpenTofu code.
@@ -23,9 +25,14 @@ pipeline:
   variables:
   - name: cell_name
     type: String
-    description: Cell to provision. Must match the opentofu/cells/<cell_name> directory. Provisioned into every region listed in the bootstrap stage.
+    description: Name of the cell to provision, e.g. cell1. Provisioned into every region listed in the bootstrap stage.
     required: true
     value: <+input>.default(cell1)
+  - name: cell_type
+    type: String
+    description: Environment this cell instance serves. Part of the workspace identifier and of every resource name, so dev and prod copies of a cell can coexist in one account.
+    required: true
+    value: <+input>.allowedValues(dev,test,stage,prod).default(dev)
   - name: aws_connector
     type: String
     description: Harness AWS connector for this cell's account. Harness pins the provider connector when a workspace is saved, so this is applied at workspace-creation time and must match the connector on an existing cell workspace.
@@ -59,6 +66,7 @@ pipeline:
                   HARNESS_ORG: <+org.identifier>
                   HARNESS_PROJECT: <+project.identifier>
                   CELL_NAME: <+pipeline.variables.cell_name>
+                  CELL_TYPE: <+pipeline.variables.cell_type>
                   AWS_CONNECTOR: <+pipeline.variables.aws_connector>
                 command: |
                   python3 - <<'PY'
@@ -71,6 +79,7 @@ pipeline:
 
                   BASE = "https://app.harness.io"
                   cell = os.environ["CELL_NAME"]
+                  cell_type = os.environ["CELL_TYPE"]
                   account = os.environ["HARNESS_ACCOUNT_ID"]
                   org = os.environ["HARNESS_ORG"]
                   project = os.environ["HARNESS_PROJECT"]
@@ -91,8 +100,10 @@ pipeline:
 
                   for region in REGIONS:
                       # Harness identifiers allow letters, digits and
-                      # underscores only, so the region's dashes are folded.
-                      ws = f"{cell}_{region.replace('-', '_')}"
+                      # underscores only, so the dashes are folded. The name
+                      # keeps the readable <cell>-<type>-<region> form.
+                      ws = f"{cell}_{cell_type}_{region.replace('-', '_')}"
+                      ws_name = f"{cell}-{cell_type}-{region}"
 
                       status, _ = call("GET", f"{root}/{ws}?accountIdentifier={account}")
                       if status < 300:
@@ -102,20 +113,22 @@ pipeline:
                       print(f"Workspace '{ws}' not found (HTTP {status}) — creating it.")
                       payload = {
                           "identifier": ws,
-                          "name": f"{cell} {region}",
-                          "description": f"{cell} in {region} — created by the Provision Cell pipeline.",
+                          "name": ws_name,
+                          "description": f"{cell} ({cell_type}) in {region} — created by the Provision Cell pipeline.",
                           "provisioner": "opentofu",
                           "provisioner_version": "latest",
                           "repository": "https://github.com/kartikkaushik27/toyota-genai-poc",
                           "repository_branch": "main",
                           "repository_connector": "github_full",
-                          # Same directory for every region: the code is
-                          # region-agnostic, only AWS_DEFAULT_REGION differs.
-                          "repository_path": f"opentofu/cells/{cell}",
+                          # One directory for every cell instance: the code
+                          # is cell- and region-agnostic. Only the variables
+                          # and AWS_DEFAULT_REGION differ between workspaces.
+                          "repository_path": "opentofu/cells",
                           "cost_estimation_enabled": False,
                           "provider_connector": os.environ["AWS_CONNECTOR"],
                           "terraform_variables": {
                               "cell_name": {"key": "cell_name", "value": cell, "value_type": "string"},
+                              "cell_type": {"key": "cell_type", "value": cell_type, "value_type": "string"},
                           },
                           "environment_variables": {
                               "AWS_ACCESS_KEY_ID": {"key": "AWS_ACCESS_KEY_ID", "value": "aws_access_key_id", "value_type": "secret"},
@@ -129,7 +142,7 @@ pipeline:
                       status, body = call("POST", f"{root}?accountIdentifier={account}", payload)
                       if status >= 300:
                           sys.exit(f"Failed to create workspace '{ws}' ({status}): {body}")
-                      print(f"Created workspace '{ws}' -> opentofu/cells/{cell} in {region}")
+                      print(f"Created workspace '{ws}' -> opentofu/cells ({cell_type}) in {region}")
                   PY
       tags: {}
   - stage:
@@ -137,7 +150,7 @@ pipeline:
       identifier: provision_us_east_1
       type: IACM
       spec:
-        workspace: <+pipeline.variables.cell_name>_us_east_1
+        workspace: <+pipeline.variables.cell_name>_<+pipeline.variables.cell_type>_us_east_1
         platform:
           os: Linux
           arch: Amd64
@@ -166,7 +179,7 @@ pipeline:
               spec:
                 approvalMessage: |
                   Review the OpenTofu plan for cell <+pipeline.variables.cell_name>
-                  in us-east-1 (connector <+pipeline.variables.aws_connector>)
+                  (<+pipeline.variables.cell_type>) in us-east-1 (connector <+pipeline.variables.aws_connector>)
                   before it is applied.
                 includePipelineExecutionHistory: true
                 isAutoRejectEnabled: false
@@ -188,7 +201,7 @@ pipeline:
       identifier: provision_us_west_2
       type: IACM
       spec:
-        workspace: <+pipeline.variables.cell_name>_us_west_2
+        workspace: <+pipeline.variables.cell_name>_<+pipeline.variables.cell_type>_us_west_2
         platform:
           os: Linux
           arch: Amd64
@@ -217,7 +230,7 @@ pipeline:
               spec:
                 approvalMessage: |
                   Review the OpenTofu plan for cell <+pipeline.variables.cell_name>
-                  in us-west-2 (connector <+pipeline.variables.aws_connector>)
+                  (<+pipeline.variables.cell_type>) in us-west-2 (connector <+pipeline.variables.aws_connector>)
                   before it is applied.
                 includePipelineExecutionHistory: true
                 isAutoRejectEnabled: false

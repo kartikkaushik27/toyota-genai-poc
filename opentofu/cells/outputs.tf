@@ -1,5 +1,6 @@
-# Makes it obvious from the run log which region's copy of the cell you are
-# looking at, since the region is no longer visible as an input variable.
+# Makes it obvious from the run log which instance of the cell you are looking
+# at — name, type and region together — since the region is not visible as an
+# input variable.
 output "cell_id" {
   value = local.cell_id
 }

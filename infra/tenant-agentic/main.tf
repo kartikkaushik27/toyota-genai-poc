@@ -1,19 +1,20 @@
 data "aws_caller_identity" "current" {}
 
-locals {
-  tenant = replace(lower(var.tenant_name), "/[^a-z0-9]/", "-")
-}
-
-# NOTE — name pattern matches opentofu/modules/gateway, which now includes the
-# region because a cell is provisioned once per region and IAM role names are
-# global. This resolves to the cell instance in the same region this tenant is
-# being onboarded into. "cell1" is still hardcoded (this module has no
-# cell_name variable of its own yet) — make it a variable when a second cell
-# is onboarded.
 data "aws_region" "current" {}
 
+locals {
+  tenant = replace(lower(var.tenant_name), "/[^a-z0-9]/", "-")
+
+  # Must match local.cell_id in opentofu/cells/main.tf: a cell instance is
+  # (name, type, region), and the tenant attaches to exactly one of them.
+  cell_id = "${var.cell_name}-${var.cell_type}-${data.aws_region.current.region}"
+}
+
+# The shared Gateway role created by opentofu/modules/gateway for this cell
+# instance. Looked up by name rather than passed in, because the cell and the
+# tenant are provisioned by separate pipelines with separate states.
 data "aws_iam_role" "gateway" {
-  name = "${var.project_prefix}-cell1-${data.aws_region.current.region}-gateway-role"
+  name = "${var.project_prefix}-${local.cell_id}-gateway-role"
 }
 
 # ── Per-tenant cross-account IAM role in Cell 1 (sheet: "Create a cross-account

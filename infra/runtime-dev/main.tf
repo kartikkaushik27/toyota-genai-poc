@@ -7,8 +7,13 @@ data "aws_ecr_repository" "agent" {
 # the cell instance living in the same region this Runtime deploys into.
 data "aws_region" "current" {}
 
+locals {
+  # Must match local.cell_id in opentofu/cells/main.tf.
+  cell_id = "${var.cell_name}-${var.cell_type}-${data.aws_region.current.region}"
+}
+
 data "aws_iam_role" "runtime" {
-  name = "${var.project_prefix}-cell1-${data.aws_region.current.region}-runtime-role"
+  name = "${var.project_prefix}-${local.cell_id}-runtime-role"
 }
 
 # ── AgentCore Runtime, Dev (sheet: "Deploy the Agentcore Runtime as a container in
