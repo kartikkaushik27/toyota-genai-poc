@@ -1,3 +1,4 @@
 
 # Local provider cache — never commit (provider binaries are ~800MB)
 .terraform/
+.terraform.lock.hcl
