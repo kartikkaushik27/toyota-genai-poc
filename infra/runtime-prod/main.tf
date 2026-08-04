@@ -8,8 +8,8 @@ data "aws_iam_role" "runtime" {
 
 resource "aws_bedrockagentcore_agent_runtime" "prod" {
   agent_runtime_name = "${replace(var.project_prefix, "-", "_")}_agent_prod"
-  description         = "Prod AgentCore Runtime for the Toyota GenAI agent"
-  role_arn            = data.aws_iam_role.runtime.arn
+  description        = "Prod AgentCore Runtime for the Toyota GenAI agent"
+  role_arn           = data.aws_iam_role.runtime.arn
 
   agent_runtime_artifact {
     container_configuration {

@@ -4,6 +4,67 @@ locals {
   tenant = replace(lower(var.tenant_name), "/[^a-z0-9]/", "-")
 }
 
+# ── Base IAM role for Cell 1 automation (sheet: "Create base IAM roles and
+#    policies in the Cell 1 account") — Tenant Onboarding.
+#
+#    RELOCATED here from infra/platform-a per the updated requirement
+#    categorization. Note this resource's name is NOT parameterized by
+#    tenant — it's a cell-account-wide role, not one role per tenant — so it
+#    is only actually created on the FIRST tenant onboarding run. Every
+#    subsequent tenant run will see it already exists in state and report
+#    "no changes" for this resource, which is the correct/expected behavior. ──
+resource "aws_iam_role" "cell_base_automation" {
+  name = "${var.project_prefix}-cell-base-automation-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = { Project = "toyota-genai-full", Purpose = "cell-base-automation" }
+}
+
+# ── Cross-account IAM role: Model Gateway -> Bedrock routing in Cell 1 (sheet:
+#    "Create cross-account IAM roles and policies so the Model Gateway can
+#    route traffic to Bedrock in Cell 1") — Tenant Onboarding.
+#
+#    RELOCATED here from infra/platform-a per the updated requirement
+#    categorization. Same idempotency note as cell_base_automation above:
+#    this is a single cell-wide role, created once on the first tenant run. ──
+resource "aws_iam_role" "model_gateway_to_bedrock" {
+  name = "${var.project_prefix}-model-gateway-bedrock-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = { Project = "toyota-genai-full", Purpose = "model-gateway-routing" }
+}
+
+resource "aws_iam_role_policy" "model_gateway_to_bedrock_permissions" {
+  name = "${var.project_prefix}-model-gateway-bedrock-permissions"
+  role = aws_iam_role.model_gateway_to_bedrock.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "BedrockRouting"
+      Effect   = "Allow"
+      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:ListFoundationModels"]
+      Resource = "*"
+    }]
+  })
+}
+
 # ── Per-tenant Bedrock Guardrail (sheet: "Create a Bedrock guardrail in Cell 1 for
 #    each new tenant") — same content policy as the platform default, but a
 #    dedicated resource per tenant so each can be tuned independently. ──
@@ -116,4 +177,12 @@ output "tenant_role_arn" {
 
 output "tenant_log_group" {
   value = aws_cloudwatch_log_group.tenant.name
+}
+
+output "cell_base_automation_role_arn" {
+  value = aws_iam_role.cell_base_automation.arn
+}
+
+output "model_gateway_role_arn" {
+  value = aws_iam_role.model_gateway_to_bedrock.arn
 }

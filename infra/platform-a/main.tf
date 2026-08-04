@@ -1,11 +1,12 @@
 data "aws_caller_identity" "current" {}
 
-# ── Bedrock enablement check (sheet: "Enable AWS Bedrock in the Cell 1 account") ──
-# There is no explicit "enable" resource for Bedrock — access is granted at the
-# account/model level. This data source proves the AWS credentials driving this
-# workspace can already reach the Bedrock control plane, which is the practical
-# definition of "enabled" for automation purposes.
-data "aws_bedrock_foundation_models" "available" {}
+# NOTE — Bedrock enablement check, the CUR2.0 S3 bucket, and the two
+# CloudWatch log groups that used to live in this file have all been
+# RELOCATED to opentofu/cells/cell1 (see opentofu/README.md) as part of the
+# Cell Provisioning restructuring — they're Cell Provisioning concerns, not
+# platform-account concerns, and the S3 bucket is now created per-cell
+# instead of once globally. This file keeps only the genuinely
+# platform-account-wide resources.
 
 # ── DynamoDB tables (sheet: "Deploy Dynamodb 3 count: tenant config, cost, tenant registration") ──
 resource "aws_dynamodb_table" "tenant_registry" {
@@ -52,20 +53,6 @@ resource "aws_dynamodb_table" "cost_tracking" {
   tags = { Project = "toyota-genai-full", Purpose = "cost-analysis" }
 }
 
-# ── Cost analysis export bucket (sheet: "S3 bucket to receive CUR2.0 data exports") ──
-resource "aws_s3_bucket" "cur_exports" {
-  bucket = "${var.project_prefix}-cur-exports-${data.aws_caller_identity.current.account_id}"
-  tags   = { Project = "toyota-genai-full", Purpose = "cost-analysis" }
-}
-
-resource "aws_s3_bucket_public_access_block" "cur_exports" {
-  bucket                  = aws_s3_bucket.cur_exports.id
-  block_public_acls       = true
-  ignore_public_acls      = true
-  block_public_policy     = true
-  restrict_public_buckets = true
-}
-
 # ── SecretsManager in Platform account (requirements: "Need SecretsManager in Platform account") ──
 resource "aws_secretsmanager_secret" "platform_config" {
   name        = "${var.project_prefix}-platform-config"
@@ -93,56 +80,11 @@ resource "aws_ecr_repository" "agent" {
   tags = { Project = "toyota-genai-full" }
 }
 
-# ── Base IAM role for Cell 1 automation (sheet: "Create base IAM roles and policies in the Cell 1 account") ──
-resource "aws_iam_role" "cell_base_automation" {
-  name = "${var.project_prefix}-cell-base-automation-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  tags = { Project = "toyota-genai-full", Purpose = "cell-base-automation" }
-}
-
-# ── Cross-account IAM role: Model Gateway -> Bedrock routing in Cell 1 ──
-# (sheet: "Create cross-account IAM roles and policies so the Model Gateway can
-# route traffic to Bedrock in Cell 1" — flagged in requirements as "needs to be
-# repeatable separately", so this is its own dedicated role, not reused from the
-# AgentCore Runtime role.)
-resource "aws_iam_role" "model_gateway_to_bedrock" {
-  name = "${var.project_prefix}-model-gateway-bedrock-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  tags = { Project = "toyota-genai-full", Purpose = "model-gateway-routing" }
-}
-
-resource "aws_iam_role_policy" "model_gateway_to_bedrock_permissions" {
-  name = "${var.project_prefix}-model-gateway-bedrock-permissions"
-  role = aws_iam_role.model_gateway_to_bedrock.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid      = "BedrockRouting"
-      Effect   = "Allow"
-      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:ListFoundationModels"]
-      Resource = "*"
-    }]
-  })
-}
+# NOTE — the base Cell-1-automation IAM role and the cross-account
+# Model-Gateway-to-Bedrock IAM role that used to live here have been
+# RELOCATED to infra/tenant-registration/main.tf. Per the updated
+# requirement categorization, both are tagged "Tenant Onboarding" rather
+# than "Cell Provisioning" — see the comments there for the moved resources.
 
 # ── IAM execution role for the AgentCore Runtime ──
 resource "aws_iam_role" "agentcore_runtime" {
@@ -198,47 +140,15 @@ resource "aws_iam_role_policy" "agentcore_runtime_permissions" {
   })
 }
 
-# ── CloudWatch: admin + model gateway API debugging (sheet rows 9-10) ──
-resource "aws_cloudwatch_log_group" "platform" {
-  name              = "/${var.project_prefix}/platform"
-  retention_in_days = 14
-  tags              = { Project = "toyota-genai-full" }
-}
-
-# ── CloudWatch: Bedrock invocation logs for cost analysis (sheet row 11) ──
-resource "aws_cloudwatch_log_group" "bedrock_invocations" {
-  name              = "/${var.project_prefix}/bedrock-invocations"
-  retention_in_days = 14
-  tags              = { Project = "toyota-genai-full", Purpose = "cost-and-debug-analysis" }
-}
-
-# ── CloudWatch dashboards (requirements row 22: "Set up cloudwatch dashboards. Cell account") ──
-resource "aws_cloudwatch_dashboard" "platform_overview" {
-  dashboard_name = "${var.project_prefix}-platform-overview"
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type   = "log"
-        x      = 0
-        y      = 0
-        width  = 24
-        height = 6
-        properties = {
-          query  = "SOURCE '${aws_cloudwatch_log_group.bedrock_invocations.name}' | fields @timestamp, @message | sort @timestamp desc | limit 50"
-          region = var.aws_region
-          title  = "Recent Bedrock Invocations"
-        }
-      }
-    ]
-  })
-}
+# NOTE — the "platform" admin/Model-Gateway-API-debug log group, the
+# "bedrock_invocations" log group, and the CloudWatch dashboard that read
+# from it have all been RELOCATED to opentofu/cells/cell1 (see
+# opentofu/README.md) — they're Cell Provisioning concerns. A per-cell
+# dashboard is a natural next addition to opentofu/modules/cell-observability
+# once more than one cell exists to compare.
 
 output "tenant_registry_table" {
   value = aws_dynamodb_table.tenant_registry.name
-}
-
-output "cur_exports_bucket" {
-  value = aws_s3_bucket.cur_exports.bucket
 }
 
 output "ecr_repository_url" {
@@ -247,16 +157,4 @@ output "ecr_repository_url" {
 
 output "agentcore_runtime_role_arn" {
   value = aws_iam_role.agentcore_runtime.arn
-}
-
-output "model_gateway_role_arn" {
-  value = aws_iam_role.model_gateway_to_bedrock.arn
-}
-
-output "platform_log_group" {
-  value = aws_cloudwatch_log_group.platform.name
-}
-
-output "bedrock_models_available" {
-  value = length(data.aws_bedrock_foundation_models.available.model_summaries)
 }

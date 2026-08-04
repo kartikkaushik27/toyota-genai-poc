@@ -13,8 +13,8 @@ data "aws_iam_role" "runtime" {
 #    AWS provider ships one. ──
 resource "aws_bedrockagentcore_agent_runtime" "dev" {
   agent_runtime_name = "${replace(var.project_prefix, "-", "_")}_agent_dev"
-  description         = "Dev AgentCore Runtime for the Toyota GenAI agent"
-  role_arn            = data.aws_iam_role.runtime.arn
+  description        = "Dev AgentCore Runtime for the Toyota GenAI agent"
+  role_arn           = data.aws_iam_role.runtime.arn
 
   agent_runtime_artifact {
     container_configuration {

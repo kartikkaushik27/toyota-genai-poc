@@ -4,8 +4,13 @@ locals {
   tenant = replace(lower(var.tenant_name), "/[^a-z0-9]/", "-")
 }
 
+# NOTE — name pattern updated to match opentofu/modules/gateway
+# ("${project_prefix}-${cell_name}-gateway-role"), following the Cell
+# Provisioning restructuring that replaced infra/platform-b-cell. "cell1" is
+# hardcoded here (this module has no cell_name variable of its own yet) —
+# turn this into a proper variable if/when a second cell is onboarded.
 data "aws_iam_role" "gateway" {
-  name = "${var.project_prefix}-gateway-role"
+  name = "${var.project_prefix}-cell1-gateway-role"
 }
 
 # ── Per-tenant cross-account IAM role in Cell 1 (sheet: "Create a cross-account
@@ -67,8 +72,8 @@ resource "aws_lambda_permission" "allow_agentcore" {
 
 # ── Inline lambda:InvokeFunction policy on the Gateway role (sheet: "Attach an
 #    inline lambda:InvokeFunction policy to the Gateway role for Lambda MCP
-#    targets") — attaches to the shared Gateway role from infra/platform-b-cell,
-#    scoped to just this tenant's Lambda ARN. ──
+#    targets") — attaches to the shared Gateway role from opentofu/cells/cell1
+#    (module.gateway), scoped to just this tenant's Lambda ARN. ──
 resource "aws_iam_role_policy" "gateway_invoke_tenant_lambda" {
   name = "${var.project_prefix}-${local.tenant}-gateway-lambda-invoke"
   role = data.aws_iam_role.gateway.id
