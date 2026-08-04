@@ -4,15 +4,20 @@ pipeline:
   projectIdentifier: toyota_genai_full
   orgIdentifier: default
   description: |
-    Provisions one GenAI Platform cell from opentofu/cells/<cell>. All cell
-    identity is passed in at run time as pipeline variables — the OpenTofu
-    code itself declares the variables but defaults none of them. The IaCM
-    workspace maps these pipeline variables onto its OpenTofu variables.
+    Provisions one GenAI Platform cell from opentofu/cells/<cell>.
+
+    One workspace per cell: the stage's workspace is resolved from the
+    cell_name input, so cell_name=cell1 targets the "cell1" IaCM workspace
+    (and its own state). Onboard a new cell with
+    harness/scripts/create-cell-workspace.py before running this for it.
+
+    project_prefix is intentionally NOT an input — there is a single
+    platform-wide prefix defined in opentofu/modules/naming.
   tags: {}
   variables:
   - name: cell_name
     type: String
-    description: Name of the cell to provision — namespaces every resource in the cell
+    description: Cell to provision. Must match both the opentofu/cells/<cell_name> directory and the IaCM workspace identifier.
     required: true
     value: <+input>.default(cell1)
   - name: aws_region
@@ -20,18 +25,18 @@ pipeline:
     description: AWS region the cell is deployed in
     required: true
     value: <+input>.default(us-east-1)
-  - name: project_prefix
+  - name: aws_connector
     type: String
-    description: Naming prefix for all resources in the cell
+    description: Harness AWS connector for this cell's account. Harness pins the provider connector on the workspace itself, so this must match the connector configured on the target cell workspace.
     required: true
-    value: <+input>.default(toyota-full)
+    value: <+input>.default(aws_full)
   stages:
   - stage:
       name: Provision Cell
       identifier: provision_cell
       type: IACM
       spec:
-        workspace: <+input>.default(toyota_full_platform_b)
+        workspace: <+pipeline.variables.cell_name>
         platform:
           os: Linux
           arch: Amd64
@@ -60,10 +65,8 @@ pipeline:
               spec:
                 approvalMessage: |
                   Review the OpenTofu plan for cell <+pipeline.variables.cell_name>
-                  before it is applied. Note: the first plan against the new
-                  cells/modules layout will show destroy+recreate of the
-                  AgentCore resources, because resource addresses moved into
-                  modules and KMS/authorizer changes are ForceNew.
+                  in region <+pipeline.variables.aws_region> (connector
+                  <+pipeline.variables.aws_connector>) before it is applied.
                 includePipelineExecutionHistory: true
                 isAutoRejectEnabled: false
                 approvers:

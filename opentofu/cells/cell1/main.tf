@@ -8,6 +8,16 @@
 # key — none of the modules themselves need to change.
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ── Platform-wide naming prefix. Defined once in modules/naming and shared
+#    by every cell, so it is NOT a per-cell pipeline input. ──
+module "naming" {
+  source = "../../modules/naming"
+}
+
+locals {
+  project_prefix = module.naming.project_prefix
+}
+
 # ── Cell Provisioning: Bedrock enablement check ──
 module "bedrock_enablement" {
   source = "../../modules/bedrock-enablement"
@@ -16,14 +26,14 @@ module "bedrock_enablement" {
 # ── Cell Provisioning: admin + Model Gateway API debug logs ──
 module "cell_observability" {
   source         = "../../modules/cell-observability"
-  project_prefix = var.project_prefix
+  project_prefix = local.project_prefix
   cell_name      = var.cell_name
 }
 
 # ── Cell Provisioning: per-cell CUR2.0 cost-export S3 bucket ──
 module "cell_cost" {
   source         = "../../modules/cell-cost"
-  project_prefix = var.project_prefix
+  project_prefix = local.project_prefix
   cell_name      = var.cell_name
 }
 
@@ -31,7 +41,7 @@ module "cell_cost" {
 #    Bedrock invocation logging (cost + debug analysis) ──
 module "runtime_iam" {
   source         = "../../modules/runtime-iam"
-  project_prefix = var.project_prefix
+  project_prefix = local.project_prefix
   cell_name      = var.cell_name
 }
 
@@ -40,7 +50,7 @@ module "runtime_iam" {
 #    itself to that one principal instead of being overly permissive. ──
 module "policy_engine" {
   source           = "../../modules/policy-engine"
-  project_prefix   = var.project_prefix
+  project_prefix   = local.project_prefix
   cell_name        = var.cell_name
   runtime_role_arn = module.runtime_iam.runtime_role_arn
 }
@@ -50,7 +60,7 @@ module "policy_engine" {
 #    enforced by OpenTofu's own dependency graph. ──
 module "gateway" {
   source            = "../../modules/gateway"
-  project_prefix    = var.project_prefix
+  project_prefix    = local.project_prefix
   cell_name         = var.cell_name
   policy_engine_arn = module.policy_engine.policy_engine_arn
 }
@@ -58,7 +68,7 @@ module "gateway" {
 # ── Cell Provisioning: default Guardrail ──
 module "guardrail" {
   source         = "../../modules/guardrail"
-  project_prefix = var.project_prefix
+  project_prefix = local.project_prefix
   cell_name      = var.cell_name
 }
 
@@ -69,7 +79,7 @@ module "guardrail" {
 #    resource that genuinely depends on outputs from BOTH the runtime-iam
 #    module and the gateway module. ──
 resource "aws_iam_role_policy" "runtime_invoke_gateway" {
-  name = "${var.project_prefix}-${var.cell_name}-runtime-invoke-gateway"
+  name = "${local.project_prefix}-${var.cell_name}-runtime-invoke-gateway"
   role = module.runtime_iam.runtime_role_id
 
   policy = jsonencode({
