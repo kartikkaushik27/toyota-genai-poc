@@ -59,10 +59,11 @@ module "policy_engine" {
 #    Policy Engine's ARN so deployment order (Policy Engine -> Gateway) is
 #    enforced by OpenTofu's own dependency graph. ──
 module "gateway" {
-  source            = "../../modules/gateway"
-  project_prefix    = local.project_prefix
-  cell_name         = var.cell_name
-  policy_engine_arn = module.policy_engine.policy_engine_arn
+  source                    = "../../modules/gateway"
+  project_prefix            = local.project_prefix
+  cell_name                 = var.cell_name
+  policy_engine_arn         = module.policy_engine.policy_engine_arn
+  policy_engine_kms_key_arn = module.policy_engine.kms_key_arn
 }
 
 # ── Cell Provisioning: default Guardrail ──

@@ -44,6 +44,18 @@ resource "aws_iam_role_policy" "gateway_permissions" {
         Resource = "*"
       },
       {
+        # The Policy Engine is encrypted with a customer-managed key, and
+        # GetPolicyEngine decrypts it on the caller's behalf. Without these,
+        # CreateGateway fails with "Access denied while calling
+        # GetPolicyEngine" even though the role already holds
+        # bedrock-agentcore:GetPolicyEngine — the denial is the KMS layer,
+        # not the AgentCore layer.
+        Sid      = "PolicyEngineKmsAccess"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey", "kms:CreateGrant"]
+        Resource = var.policy_engine_kms_key_arn
+      },
+      {
         Sid      = "Logging"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -96,16 +108,19 @@ resource "aws_bedrockagentcore_gateway" "cell" {
     mode = "LOG_ONLY" # LOG_ONLY for the POC so a bad policy can't lock out every tool call
   }
 
-  depends_on = [time_sleep.gateway_iam_propagation]
+  depends_on = [time_sleep.gateway_iam_propagation_v2]
 
   tags = { Project = "toyota-genai-full", Cell = var.cell_name }
 }
 
 # IAM is eventually consistent — the AuthorizeAction/PartiallyAuthorizeActions
-# permissions the Gateway needs on the Policy Engine can take longer to
-# propagate than the immediate next API call. This gives it a fixed buffer
-# instead of failing intermittently.
-resource "time_sleep" "gateway_iam_propagation" {
+# and KMS permissions the Gateway needs on the Policy Engine can take longer
+# to propagate than the immediate next API call. This gives it a fixed buffer
+# instead of failing intermittently. (Suffixed _v2 because time_sleep only
+# sleeps when the resource is first created: bumping the duration or changing
+# the policy it guards is a no-op on an existing instance, so the resource has
+# to be renamed to force a real new wait.)
+resource "time_sleep" "gateway_iam_propagation_v2" {
   depends_on      = [aws_iam_role_policy.gateway_permissions]
   create_duration = "45s"
 }
